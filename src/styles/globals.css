@@ -1,0 +1,156 @@
+/* Bring in React Flow styles before Tailwind so @import stays at the top. */
+@import "reactflow/dist/style.css";
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  font-feature-settings: "ss01", "cv11";
+  color: theme("colors.ink.900");
+  background: theme("colors.canvas");
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Global focus ring — subtle but visible. */
+*:focus-visible {
+  outline: 2px solid theme("colors.brand.500");
+  outline-offset: 2px;
+}
+
+/* React Flow tweaks ------------------------------------------------------ */
+
+.react-flow__attribution {
+  display: none;
+}
+
+/* Let our custom node fully control sizing/border. */
+.react-flow__node {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  width: auto;
+}
+
+/* Handles — small white dot with a gray ring; brand blue on hover/connect. */
+.react-flow__handle {
+  width: 10px;
+  height: 10px;
+  background: #ffffff;
+  border: 1.5px solid #94a3b8;
+  transition: border-color 120ms ease, transform 120ms ease, background 120ms ease;
+}
+
+.react-flow__handle:hover {
+  border-color: theme("colors.brand.500");
+  transform: scale(1.15) translate(50%, -50%);
+}
+
+.react-flow__handle.react-flow__handle-left:hover {
+  transform: scale(1.15) translate(-50%, -50%);
+}
+
+.react-flow__handle.react-flow__handle-connecting {
+  background: theme("colors.brand.500");
+  border-color: theme("colors.brand.600");
+}
+
+.react-flow__handle.react-flow__handle-valid {
+  background: #34d399;
+  border-color: #059669;
+}
+
+/* Edges — slightly heavier on selection, brand blue. */
+.react-flow__edge-path {
+  stroke: #94a3b8;
+  stroke-width: 1.5;
+}
+
+.react-flow__edge.selected .react-flow__edge-path,
+.react-flow__edge:focus .react-flow__edge-path {
+  stroke: theme("colors.brand.500");
+  stroke-width: 2;
+}
+
+.react-flow__edge.selected .react-flow__arrowhead,
+.react-flow__edge:focus .react-flow__arrowhead {
+  fill: theme("colors.brand.500");
+  stroke: theme("colors.brand.500");
+}
+
+/* Bottom-left zoom/fit/lock controls. */
+.react-flow__controls {
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06),
+    0 4px 12px rgba(15, 23, 42, 0.04);
+  border: 1px solid theme("colors.ink.100");
+}
+
+.react-flow__controls-button {
+  background: #ffffff;
+  border: none;
+  border-bottom: 1px solid theme("colors.ink.100");
+  width: 28px;
+  height: 28px;
+  color: theme("colors.ink.700");
+  transition: background-color 120ms ease;
+}
+
+.react-flow__controls-button:hover {
+  background: theme("colors.ink.100");
+  color: theme("colors.ink.900");
+}
+
+.react-flow__controls-button:last-child {
+  border-bottom: none;
+}
+
+.react-flow__controls-button svg {
+  fill: currentColor;
+  max-width: 14px;
+  max-height: 14px;
+}
+
+/* Bottom-right minimap. */
+.react-flow__minimap {
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06),
+    0 4px 12px rgba(15, 23, 42, 0.04);
+  border: 1px solid theme("colors.ink.100");
+}
+
+/* Selection rectangle (Shift+drag). */
+.react-flow__selection {
+  background: rgba(37, 99, 235, 0.06);
+  border: 1px dashed theme("colors.brand.500");
+}
+
+/* Drag-from-palette ghost preview. */
+.palette-drag-ghost {
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+/* Subtle scrollbar polish for the right panel. */
+.scrollbar-soft::-webkit-scrollbar {
+  width: 8px;
+}
+.scrollbar-soft::-webkit-scrollbar-thumb {
+  background: theme("colors.ink.100");
+  border-radius: 8px;
+}
+.scrollbar-soft::-webkit-scrollbar-thumb:hover {
+  background: theme("colors.ink.300");
+}
