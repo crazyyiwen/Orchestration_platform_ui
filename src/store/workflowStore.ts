@@ -17,6 +17,7 @@ import { create } from "zustand";
 import {
   applyEdgeChanges,
   applyNodeChanges,
+  updateEdge as rfUpdateEdge,
   type Connection,
   type Edge,
   type EdgeChange,
@@ -72,6 +73,10 @@ function toRFEdges(edges: WorkflowEdge[]): Edge[] {
     sourceHandle: e.sourceHandle ?? undefined,
     target: e.target,
     targetHandle: e.targetHandle ?? undefined,
+    // The `adjustable` custom edge reads `data.routingOffset` to render its
+    // user-controlled midpoint.
+    type: "adjustable",
+    data: e.data,
   }));
 }
 
@@ -95,6 +100,7 @@ function fromRFEdges(edges: Edge[]): WorkflowEdge[] {
     sourceHandle: e.sourceHandle ?? null,
     target: e.target,
     targetHandle: e.targetHandle ?? null,
+    data: e.data as WorkflowEdge["data"],
   }));
 }
 
@@ -147,6 +153,15 @@ export interface WorkflowState {
   applyNodeChanges: (changes: NodeChange[]) => void;
   applyEdgeChanges: (changes: EdgeChange[]) => void;
   connect: (connection: Connection) => void;
+  /** Reconnect an existing edge — used when a user drags an edge endpoint to
+   *  a different handle. Preserves the edge id so listeners stay stable. */
+  updateEdgeConnection: (oldEdge: Edge, newConnection: Connection) => void;
+  /** Patch the `data` field of an edge — used by AdjustableEdge to persist
+   *  the user's manual routing offset as they drag the wire's midpoint. */
+  updateEdgeData: (
+    edgeId: string,
+    patch: NonNullable<WorkflowEdge["data"]>
+  ) => void;
 
   /** Selection */
   selectNode: (id: string | null) => void;
@@ -218,6 +233,34 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       targetHandle: connection.targetHandle ?? null,
     };
     set((s) => ({ doc: { ...s.doc, edges: [...s.doc.edges, newEdge] } }));
+  },
+
+  updateEdgeConnection: (oldEdge, newConnection) => {
+    if (!newConnection.source || !newConnection.target) return;
+    set((s) => {
+      const next = rfUpdateEdge(
+        oldEdge,
+        newConnection,
+        toRFEdges(s.doc.edges),
+        // Keep the original edge id so external references stay valid
+        // (HandoffListField looks up edges by source + sourceHandle).
+        { shouldReplaceId: false }
+      );
+      return { doc: { ...s.doc, edges: fromRFEdges(next) } };
+    });
+  },
+
+  updateEdgeData: (edgeId, patch) => {
+    set((s) => ({
+      doc: {
+        ...s.doc,
+        edges: s.doc.edges.map((e) =>
+          e.id === edgeId
+            ? { ...e, data: { ...(e.data ?? {}), ...patch } }
+            : e
+        ),
+      },
+    }));
   },
 
   selectNode: (id) => set({ selectedNodeId: id }),

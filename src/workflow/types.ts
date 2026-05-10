@@ -31,7 +31,8 @@ export type FieldType =
   | "condition-builder"
   | "schema-builder"
   | "accordion-section"
-  | "script-runner";
+  | "script-runner"
+  | "handoff-list";
 
 export interface FieldOption {
   label: string;
@@ -73,6 +74,8 @@ export interface FormSection {
 export interface HandleSpec {
   id: string;
   label?: string;
+  /** Optional kind for dynamic handles (e.g. agent handoffs are tinted). */
+  kind?: "default" | "handoff" | "branch";
 }
 
 /** Names map to lucide-react icons via `components/ui/Icon.tsx`. */
@@ -180,6 +183,11 @@ export interface WorkflowEdge {
   sourceHandle?: string | null;
   target: string;
   targetHandle?: string | null;
+  /** Optional per-edge runtime fields. `routingOffset` is set when a user
+   *  drags the wire's midpoint to reroute it manually. */
+  data?: {
+    routingOffset?: { x: number; y: number };
+  };
 }
 
 export interface WorkflowVariables {

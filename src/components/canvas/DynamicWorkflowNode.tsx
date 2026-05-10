@@ -1,5 +1,6 @@
 import { memo } from "react";
 import clsx from "clsx";
+import { CornerDownRight } from "lucide-react";
 import { Handle, Position, type NodeProps } from "reactflow";
 
 import { nodeRegistry } from "@/workflow/nodeRegistry";
@@ -12,13 +13,19 @@ import { ICON_BG_LARGE } from "@/components/ui/colorTokens";
  * screen — LLM, Agent, Rule, Output, etc. — renders through this component.
  *
  * Layout strategy:
- *  - With ≤1 input/output handles: handles pin to the header row's left/right
- *    edge (the classic compact card).
- *  - With >1 handles on a side: the card grows by rendering one row per
- *    branch, each row hosting its own handle. The handle pins to its row
- *    via React Flow's default `right:0; top:50%` CSS, since each row is the
- *    nearest positioned ancestor. This is what makes Rule / Approval /
- *    Guardrail nodes resize cleanly as branches are added.
+ *  - The card has at most one input handle on the left edge of the header.
+ *  - "Header outputs" pin to the right edge of the header (compact card).
+ *  - "Row outputs" render below the header, one per row, each with its own
+ *    handle. Rule branches and Agent handoffs become row outputs; Approval
+ *    (approved/rejected) and Guardrail (allow/block) also use rows because
+ *    they carry more than one branch from the registry.
+ *
+ *  Example combinations:
+ *   - LLM:                      header out
+ *   - Approval:                 row outputs (approved, rejected)
+ *   - Rule (3 blocks):          row outputs (case_1, case_2, else)
+ *   - Agent (no handoffs):      header out
+ *   - Agent (2 handoffs):       header out + 2 handoff rows below
  */
 function DynamicWorkflowNodeBase({
   data,
@@ -35,11 +42,10 @@ function DynamicWorkflowNodeBase({
   }
 
   const inputHandles: HandleSpec[] = def.handles.inputs;
-  const outputHandles: HandleSpec[] = computeOutputHandles(def.type, data);
+  const { headerOutputs, rowOutputs } = splitOutputs(def.type, data);
   const sublabel = pickSublabel(data);
 
   const multiInput = inputHandles.length > 1;
-  const multiOutput = outputHandles.length > 1;
 
   return (
     <div
@@ -78,31 +84,48 @@ function DynamicWorkflowNodeBase({
               position={Position.Left}
             />
           ))}
-        {!multiOutput &&
-          outputHandles.map((h) => (
-            <Handle
-              key={`out-${h.id}`}
-              id={h.id}
-              type="source"
-              position={Position.Right}
-            />
-          ))}
+        {headerOutputs.map((h) => (
+          <Handle
+            key={`out-${h.id}`}
+            id={h.id}
+            type="source"
+            position={Position.Right}
+          />
+        ))}
       </div>
 
-      {/* Multi-output: one row per branch. Card grows with the list. */}
-      {multiOutput && (
+      {/* Row outputs: rule branches, agent handoffs, multi-output gates. */}
+      {rowOutputs.length > 0 && (
         <ul className="border-t border-ink-100 py-1">
-          {outputHandles.map((h) => (
-            <li
-              key={`out-row-${h.id}`}
-              className="relative flex items-center justify-end gap-2 py-1.5 pl-3 pr-4 text-[11px] text-ink-700"
-            >
-              <span className="truncate text-right" title={h.label ?? h.id}>
-                {h.label ?? h.id}
-              </span>
-              <Handle id={h.id} type="source" position={Position.Right} />
-            </li>
-          ))}
+          {rowOutputs.map((h) => {
+            const isHandoff = h.kind === "handoff";
+            return (
+              <li
+                key={`out-row-${h.id}`}
+                className={clsx(
+                  "relative flex items-center justify-end gap-1.5 py-1.5 pl-3 pr-4 text-[11px]",
+                  isHandoff ? "text-orange-700" : "text-ink-700"
+                )}
+              >
+                {isHandoff && (
+                  <CornerDownRight
+                    size={11}
+                    className="shrink-0 text-orange-500"
+                  />
+                )}
+                <span
+                  className={clsx(
+                    "truncate text-right",
+                    isHandoff && "font-medium"
+                  )}
+                  title={h.label ?? h.id}
+                >
+                  {h.label ?? h.id}
+                </span>
+                <Handle id={h.id} type="source" position={Position.Right} />
+              </li>
+            );
+          })}
         </ul>
       )}
 
@@ -130,21 +153,65 @@ function DynamicWorkflowNodeBase({
 /* Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-/** Compute output handles. Rule nodes generate one per block. */
-function computeOutputHandles(
+interface OutputLayout {
+  headerOutputs: HandleSpec[];
+  rowOutputs: HandleSpec[];
+}
+
+/** Decide which output handles render in the header vs as rows below. */
+function splitOutputs(type: string, data: WorkflowNodeData): OutputLayout {
+  const def = nodeRegistry[type];
+  const standard: HandleSpec[] = def?.handles.outputs ?? [];
+  const dynamic = computeDynamicOutputs(type, data);
+
+  if (dynamic.length === 0) {
+    if (standard.length <= 1) {
+      // 0 or 1 standard outputs → header.
+      return { headerOutputs: standard, rowOutputs: [] };
+    }
+    // 2+ standard outputs (Approval, Guardrail) → rows.
+    return { headerOutputs: [], rowOutputs: standard };
+  }
+
+  // Has dynamic outputs (rule blocks, agent handoffs).
+  if (standard.length === 1) {
+    // Default 'out' stays in header, dynamic outputs become rows below.
+    return { headerOutputs: standard, rowOutputs: dynamic };
+  }
+  // No fixed default — dynamic + any standard all become rows.
+  return { headerOutputs: [], rowOutputs: [...standard, ...dynamic] };
+}
+
+/** Per-type runtime-derived output handles. */
+function computeDynamicOutputs(
   type: string,
   data: WorkflowNodeData
 ): HandleSpec[] {
+  const cfg = data.config as Record<string, unknown> | undefined;
+
   if (type === "rule") {
-    const blocks = (data.config?.blocks as Array<{
-      id: string;
-      label?: string;
-    }> | undefined) ?? [];
-    if (blocks.length > 0) {
-      return blocks.map((b) => ({ id: b.id, label: b.label ?? b.id }));
-    }
+    const blocks = (cfg?.blocks as
+      | Array<{ id: string; label?: string }>
+      | undefined) ?? [];
+    return blocks.map((b) => ({
+      id: b.id,
+      label: b.label ?? b.id,
+      kind: "branch",
+    }));
   }
-  return nodeRegistry[type]?.handles.outputs ?? [];
+
+  if (type === "agent") {
+    const handoffs = (cfg?.handoffs as
+      | Array<{ id: string; name?: string }>
+      | undefined) ?? [];
+    return handoffs.map((h) => ({
+      id: h.id,
+      label: h.name?.trim() ? h.name : "handoff",
+      kind: "handoff",
+    }));
+  }
+
+  return [];
 }
 
 function pickSublabel(data: WorkflowNodeData): string | null {

@@ -179,6 +179,9 @@ export const nodeRegistry: NodeRegistry = {
       libraries: [],
       skills: [],
       widgets: [],
+      // Handoff configurations — each handoff exposes a labeled output handle
+      // on the canvas card, mapping to LangGraph's add_node + edge pattern.
+      handoffs: [],
     },
     handles: {
       inputs: [{ id: "in", label: "Input" }],
@@ -234,8 +237,23 @@ export const nodeRegistry: NodeRegistry = {
           {
             key: "config.tools",
             label: "Tools",
+            description:
+              "Bound function tools the agent may call. These don't add canvas connections.",
             type: "multi-select",
             optionsSource: "tools",
+          },
+        ],
+      },
+      {
+        id: "handoffs",
+        title: "Handoffs",
+        fields: [
+          {
+            key: "config.handoffs",
+            label: "Handoffs",
+            description:
+              "Each handoff adds an output handle on the canvas. Drag from it to the target node.",
+            type: "handoff-list",
           },
         ],
       },

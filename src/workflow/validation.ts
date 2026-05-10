@@ -47,6 +47,14 @@ const edgeSchema = z.object({
   target: z.string().min(1),
   sourceHandle: z.string().nullable().optional(),
   targetHandle: z.string().nullable().optional(),
+  data: z
+    .object({
+      routingOffset: z
+        .object({ x: z.number(), y: z.number() })
+        .optional(),
+    })
+    .partial()
+    .optional(),
 });
 
 const variablesSchema = z.object({

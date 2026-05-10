@@ -30,6 +30,7 @@ import { SchemaBuilder } from "./fields/SchemaBuilder";
 import { ConditionBuilder } from "./fields/ConditionBuilder";
 import { AccordionField } from "./fields/AccordionField";
 import { ScriptRunner } from "./fields/ScriptRunner";
+import { HandoffListField } from "./fields/HandoffListField";
 
 /* ------------------------------------------------------------------ */
 /* Field frame: label + body                                           */
@@ -121,6 +122,8 @@ function FieldBody({
       );
     case "script-runner":
       return <ScriptRunner nodeId={nodeId} field={field} />;
+    case "handoff-list":
+      return <HandoffListField nodeId={nodeId} fieldKey={field.key} />;
     case "accordion-section":
       // Handled in `FieldRenderer`, never reached.
       return null;

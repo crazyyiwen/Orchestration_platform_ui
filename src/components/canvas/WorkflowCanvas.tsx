@@ -7,6 +7,7 @@ import ReactFlow, {
   MiniMap,
   ReactFlowProvider,
   useReactFlow,
+  type Connection,
   type Edge,
   type Node,
   type ReactFlowInstance,
@@ -17,6 +18,7 @@ import { nodeRegistry } from "@/workflow/nodeRegistry";
 import { MINIMAP_COLORS } from "@/components/ui/colorTokens";
 import type { WorkflowNodeData } from "@/workflow/types";
 import { DynamicWorkflowNode } from "./DynamicWorkflowNode";
+import { AdjustableEdge } from "./AdjustableEdge";
 import { PALETTE_DND_TYPE } from "@/components/layout/NodePalette";
 
 /**
@@ -45,10 +47,40 @@ function CanvasInner() {
   const applyNodeChanges = useWorkflowStore((s) => s.applyNodeChanges);
   const applyEdgeChanges = useWorkflowStore((s) => s.applyEdgeChanges);
   const connect = useWorkflowStore((s) => s.connect);
+  const updateEdgeConnection = useWorkflowStore(
+    (s) => s.updateEdgeConnection
+  );
   const selectNode = useWorkflowStore((s) => s.selectNode);
   const addNodeFromPalette = useWorkflowStore((s) => s.addNodeFromPalette);
   const removeNode = useWorkflowStore((s) => s.removeNode);
   const removeEdge = useWorkflowStore((s) => s.removeEdge);
+
+  // Tracks whether a drag of an edge endpoint landed on a valid target.
+  // If false at drag end, the user dropped the endpoint on empty canvas →
+  // remove the edge (standard React Flow "drag-to-delete" pattern).
+  const edgeUpdateSuccessful = useRef(true);
+
+  const onEdgeUpdateStart = useCallback(() => {
+    edgeUpdateSuccessful.current = false;
+  }, []);
+
+  const onEdgeUpdate = useCallback(
+    (oldEdge: Edge, newConnection: Connection) => {
+      edgeUpdateSuccessful.current = true;
+      updateEdgeConnection(oldEdge, newConnection);
+    },
+    [updateEdgeConnection]
+  );
+
+  const onEdgeUpdateEnd = useCallback(
+    (_event: MouseEvent | TouchEvent, edge: Edge) => {
+      if (!edgeUpdateSuccessful.current) {
+        removeEdge(edge.id);
+      }
+      edgeUpdateSuccessful.current = true;
+    },
+    [removeEdge]
+  );
 
   const { screenToFlowPosition } = useReactFlow();
 
@@ -78,16 +110,23 @@ function CanvasInner() {
     () =>
       edges.map((e) => ({
         id: e.id,
+        type: "adjustable",
         source: e.source,
         sourceHandle: e.sourceHandle ?? undefined,
         target: e.target,
         targetHandle: e.targetHandle ?? undefined,
+        data: e.data,
       })),
     [edges]
   );
 
   const nodeTypes = useMemo(
     () => ({ dynamic: DynamicWorkflowNode }),
+    []
+  );
+
+  const edgeTypes = useMemo(
+    () => ({ adjustable: AdjustableEdge }),
     []
   );
 
@@ -126,12 +165,17 @@ function CanvasInner() {
         nodes={rfNodes}
         edges={rfEdges}
         nodeTypes={nodeTypes}
+        edgeTypes={edgeTypes}
         onInit={(instance) => {
           rfInstanceRef.current = instance;
         }}
         onNodesChange={applyNodeChanges}
         onEdgesChange={applyEdgeChanges}
         onConnect={connect}
+        onEdgeUpdate={onEdgeUpdate}
+        onEdgeUpdateStart={onEdgeUpdateStart}
+        onEdgeUpdateEnd={onEdgeUpdateEnd}
+        edgeUpdaterRadius={14}
         onNodeClick={(_, n) => selectNode(n.id)}
         onPaneClick={() => selectNode(null)}
         onNodesDelete={(deleted) => deleted.forEach((n) => removeNode(n.id))}
@@ -140,7 +184,7 @@ function CanvasInner() {
         fitView
         fitViewOptions={{ padding: 0.2, minZoom: 0.4, maxZoom: 1.5 }}
         defaultEdgeOptions={{
-          type: "smoothstep",
+          type: "adjustable",
           markerEnd: {
             type: MarkerType.ArrowClosed,
             color: "#94a3b8",
