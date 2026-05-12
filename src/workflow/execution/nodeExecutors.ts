@@ -11,6 +11,7 @@
  */
 
 import type { WorkflowNode } from "@/workflow/types";
+import { sanitizeHtml } from "@/utils/sanitizeHtml";
 import {
   resolveDeep,
   resolveString,
@@ -307,6 +308,24 @@ const variableUpdate: NodeExecutor = ({ node, ctx }) => {
   };
 };
 
+const uiView: NodeExecutor = ({ node, ctx }) => {
+  const cfg = asConfig(node);
+  const template = String(cfg.html ?? "");
+  const sanitize = cfg.sanitize !== false;
+  const resolved = resolveString(template, ctx);
+  const html = sanitize ? sanitizeHtml(resolved) : resolved;
+  // The `kind: "ui-view"` marker tells the RunPanel to render the HTML
+  // inside a sandboxed iframe instead of dumping it as JSON.
+  return {
+    kind: "done",
+    result: {
+      kind: "ui-view",
+      html,
+      sanitized: sanitize,
+    },
+  };
+};
+
 const output: NodeExecutor = ({ node, ctx }) => {
   const cfg = asConfig(node);
   const mappings = Array.isArray(cfg.mappings)
@@ -373,6 +392,7 @@ export const nodeExecutors: Record<string, NodeExecutor> = {
   rule,
   subFlow,
   variableUpdate,
+  uiView,
   output,
   approval,
   humanInput,

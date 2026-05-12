@@ -72,14 +72,30 @@ const variablesSchema = z.object({
   }),
 });
 
-export const workflowDocSchema = z.object({
+const flowVariableSchema = z.object({
   id: z.string().min(1),
   name: z.string().min(1),
-  version: z.number().int().nonnegative(),
-  nodes: z.array(nodeSchema),
-  edges: z.array(edgeSchema),
-  variables: variablesSchema,
+  description: z.string().optional(),
+  type: z.enum(["string", "number", "boolean", "array", "object"]),
+  defaultValue: z.unknown().optional(),
 });
+
+export const workflowDocSchema = z
+  .object({
+    id: z.string().min(1),
+    name: z.string().min(1),
+    version: z.number().int().nonnegative(),
+    nodes: z.array(nodeSchema),
+    edges: z.array(edgeSchema),
+    variables: variablesSchema,
+    // Tolerant on read — older saved docs predate flowVariables. We coerce
+    // to [] in `deserializeWorkflow`.
+    flowVariables: z.array(flowVariableSchema).optional(),
+  })
+  .transform((doc) => ({
+    ...doc,
+    flowVariables: doc.flowVariables ?? [],
+  }));
 
 export interface ValidationIssue {
   path: string;
@@ -106,6 +122,18 @@ export function validateWorkflow(doc: unknown): ValidationResult {
   }
 
   const data = parsed.data as WorkflowDoc;
+
+  // Unique flow-variable names (case-sensitive).
+  const flowNames = new Set<string>();
+  for (const v of data.flowVariables) {
+    if (flowNames.has(v.name)) {
+      issues.push({
+        path: `flowVariables.${v.id}.name`,
+        message: `Duplicate flow variable: "${v.name}"`,
+      });
+    }
+    flowNames.add(v.name);
+  }
 
   // Unique node names.
   const seen = new Set<string>();

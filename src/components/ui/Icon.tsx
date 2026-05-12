@@ -5,6 +5,7 @@ import {
   Code2,
   GitBranch,
   Globe,
+  LayoutTemplate,
   LogOut,
   Play,
   Send,
@@ -37,6 +38,7 @@ const ICONS: Record<IconName, LucideIcon> = {
   "check-circle-2": CheckCircle2,
   user: User,
   play: Play,
+  "layout-template": LayoutTemplate,
   circle: Circle,
 };
 

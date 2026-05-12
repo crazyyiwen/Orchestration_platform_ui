@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState } from "react";
+import clsx from "clsx";
 import {
   Download,
   Eye,
+  FilePlus,
+  FolderOpen,
   Play,
   Save,
   Search,
   Settings2,
   Undo2,
   Upload,
+  Variable as VarIcon,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/Button";
@@ -30,6 +34,11 @@ export function Header() {
   const exportToFile = useWorkflowStore((s) => s.exportToFile);
   const importFromFile = useWorkflowStore((s) => s.importFromFile);
   const openRun = useWorkflowStore((s) => s.openRun);
+  const openVariables = useWorkflowStore((s) => s.openVariables);
+  const variablesOpen = useWorkflowStore((s) => s.variablesOpen);
+  const closeVariables = useWorkflowStore((s) => s.closeVariables);
+  const createNewWorkflow = useWorkflowStore((s) => s.createNewWorkflow);
+  const openWorkflowsList = useWorkflowStore((s) => s.openWorkflowsList);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showSavedFlash, setShowSavedFlash] = useState(false);
@@ -42,12 +51,15 @@ export function Header() {
     return () => window.clearTimeout(t);
   }, [lastSavedAt]);
 
-  const handleSave = () => {
-    const result = save();
-    if (!result.ok) {
+  const handleSave = async () => {
+    const result = await save();
+    if (result.ok) return;
+    if (result.issues.length > 0) {
       // Validation issues are already in saveError; surface them as alert too.
       const summary = result.issues.map((i) => `• ${i.message}`).join("\n");
       window.alert(`Cannot save — workflow is invalid:\n${summary}`);
+    } else if (result.error) {
+      window.alert(result.error);
     }
   };
 
@@ -104,9 +116,43 @@ export function Header() {
         <Button variant="ghost" size="sm" aria-label="Settings" title="Settings">
           <Settings2 size={16} />
         </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={variablesOpen ? closeVariables : openVariables}
+          aria-label="Variables"
+          aria-pressed={variablesOpen}
+          title="Manage flow variables"
+          className={clsx(
+            variablesOpen && "bg-indigo-50 text-indigo-700 hover:bg-indigo-100"
+          )}
+        >
+          <VarIcon size={16} />
+        </Button>
 
         <div className="mx-2 h-5 w-px bg-ink-100" />
 
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={async () => {
+            const result = await createNewWorkflow();
+            if (!result.ok && result.error) window.alert(result.error);
+          }}
+          aria-label="New workflow"
+          title="New workflow"
+        >
+          <FilePlus size={16} />
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={openWorkflowsList}
+          aria-label="Open workflow"
+          title="Open saved workflow"
+        >
+          <FolderOpen size={16} />
+        </Button>
         <Button
           variant="ghost"
           size="sm"

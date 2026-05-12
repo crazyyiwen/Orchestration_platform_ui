@@ -43,5 +43,6 @@ export function createEmptyWorkflow(): WorkflowDoc {
         },
       },
     },
+    flowVariables: [],
   };
 }

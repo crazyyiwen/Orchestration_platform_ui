@@ -3,6 +3,8 @@ import { NodePalette } from "@/components/layout/NodePalette";
 import { PropertiesPanel } from "@/components/layout/PropertiesPanel";
 import { WorkflowCanvas } from "@/components/canvas/WorkflowCanvas";
 import { RunPanel } from "@/components/run/RunPanel";
+import { VariablesPanel } from "@/components/variables/VariablesPanel";
+import { WorkflowsListModal } from "@/components/workflows/WorkflowsListModal";
 
 /**
  * Three-column shell: Header + (Palette | Canvas | PropertiesPanel).
@@ -21,6 +23,8 @@ export function App() {
         </main>
         <PropertiesPanel />
       </div>
+      <VariablesPanel />
+      <WorkflowsListModal />
       <RunPanel />
     </div>
   );

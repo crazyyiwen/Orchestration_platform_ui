@@ -86,6 +86,7 @@ export function makeInitialState(seed?: { userQuery?: string }): RuntimeState {
         workflowMetaData: { workflowId: "", agentName: "" },
       },
       nodes: {},
+      flow: {},
     },
     log: [],
     status: "idle",
@@ -103,6 +104,12 @@ export function startExecution(
   const state = makeInitialState(seed);
   state.ctx.runtime.workflowMetaData.workflowId = doc.id;
   state.ctx.runtime.workflowMetaData.agentName = doc.name;
+
+  // Seed flow variables from their declared defaults.
+  for (const v of doc.flowVariables ?? []) {
+    if (!v.name) continue;
+    state.ctx.flow[v.name] = v.defaultValue ?? defaultValueForType(v.type);
+  }
 
   const startNode = doc.nodes.find((n) => n.data.type === "start");
   if (!startNode) {
@@ -275,4 +282,20 @@ function finishWithError(state: RuntimeState, error: string): RunTick {
   state.error = error;
   state.currentNodeId = null;
   return { kind: "error", state };
+}
+
+function defaultValueForType(t: string): unknown {
+  switch (t) {
+    case "number":
+      return 0;
+    case "boolean":
+      return false;
+    case "array":
+      return [];
+    case "object":
+      return {};
+    case "string":
+    default:
+      return "";
+  }
 }

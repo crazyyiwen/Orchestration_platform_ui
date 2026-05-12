@@ -32,7 +32,8 @@ export type FieldType =
   | "schema-builder"
   | "accordion-section"
   | "script-runner"
-  | "handoff-list";
+  | "handoff-list"
+  | "ui-view-preview";
 
 export interface FieldOption {
   label: string;
@@ -93,6 +94,7 @@ export type IconName =
   | "check-circle-2"
   | "user"
   | "play"
+  | "layout-template"
   | "circle";
 
 /** Tailwind-friendly accent palette used for the icon block on each card. */
@@ -205,6 +207,23 @@ export interface WorkflowVariables {
   };
 }
 
+/** User-defined flow-scoped state variable, referenced as `{{flow.<name>}}`. */
+export type FlowVariableType =
+  | "string"
+  | "number"
+  | "boolean"
+  | "array"
+  | "object";
+
+export interface FlowVariable {
+  id: string;
+  name: string;
+  description?: string;
+  type: FlowVariableType;
+  /** Optional initial value, used to seed `ctx.flow` at run start. */
+  defaultValue?: unknown;
+}
+
 export interface WorkflowDoc {
   id: string;
   name: string;
@@ -212,4 +231,6 @@ export interface WorkflowDoc {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
   variables: WorkflowVariables;
+  /** Global flow-scoped variables shared across every node via `{{flow.<name>}}`. */
+  flowVariables: FlowVariable[];
 }

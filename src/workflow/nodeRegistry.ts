@@ -740,6 +740,66 @@ export const nodeRegistry: NodeRegistry = {
     ],
   },
 
+  uiView: {
+    type: "uiView",
+    label: "UI View",
+    icon: "layout-template",
+    color: "sky",
+    category: "I/O",
+    description:
+      "Render a custom HTML view. Supports {{variable.path}} interpolation.",
+    defaultNamePrefix: "ui_view",
+    defaultConfig: {
+      html:
+        '<div style="padding: 16px; font-family: ui-sans-serif, system-ui, sans-serif; color: #0f172a;">\n' +
+        '  <h2 style="margin: 0 0 8px; font-size: 18px; font-weight: 600;">Result</h2>\n' +
+        '  <p style="margin: 0; color: #475569;">You asked: <strong>{{system.userQuery}}</strong></p>\n' +
+        "</div>",
+      sanitize: true,
+    },
+    handles: {
+      inputs: [{ id: "in", label: "Input" }],
+      outputs: [{ id: "out", label: "Output" }],
+    },
+    formSections: [
+      {
+        id: "html",
+        title: "HTML Template",
+        fields: [
+          {
+            key: "config.html",
+            label: "HTML",
+            description:
+              "Write any HTML. Use {{variable.path}} placeholders — they're resolved at runtime.",
+            type: "code",
+            meta: { language: "html", rows: 12 },
+          },
+        ],
+      },
+      {
+        id: "preview",
+        title: "Preview",
+        fields: [
+          {
+            key: "config.html",
+            label: "Live preview",
+            type: "ui-view-preview",
+          },
+        ],
+      },
+      advanced([
+        {
+          key: "config.sanitize",
+          label: "Sanitize HTML",
+          description:
+            "Strips <script>, <iframe>, and inline event handlers. Recommended.",
+          type: "switch",
+          defaultValue: true,
+        },
+      ]),
+    ],
+  },
+
   output: {
     type: "output",
     label: "Output",
@@ -861,6 +921,7 @@ export const paletteOrder: string[] = [
   "rule",
   "subFlow",
   "variableUpdate",
+  "uiView",
   "output",
   "approval",
   "humanInput",

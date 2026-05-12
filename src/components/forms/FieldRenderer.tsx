@@ -31,6 +31,7 @@ import { ConditionBuilder } from "./fields/ConditionBuilder";
 import { AccordionField } from "./fields/AccordionField";
 import { ScriptRunner } from "./fields/ScriptRunner";
 import { HandoffListField } from "./fields/HandoffListField";
+import { UiViewPreview } from "./fields/UiViewPreview";
 
 /* ------------------------------------------------------------------ */
 /* Field frame: label + body                                           */
@@ -124,6 +125,8 @@ function FieldBody({
       return <ScriptRunner nodeId={nodeId} field={field} />;
     case "handoff-list":
       return <HandoffListField nodeId={nodeId} fieldKey={field.key} />;
+    case "ui-view-preview":
+      return <UiViewPreview nodeId={nodeId} />;
     case "accordion-section":
       // Handled in `FieldRenderer`, never reached.
       return null;

@@ -29,16 +29,26 @@ import { nanoid } from "nanoid";
 import { nodeRegistry } from "@/workflow/nodeRegistry";
 import { createEmptyWorkflow } from "@/workflow/defaultWorkflow";
 import {
+  bootstrapInitialDoc,
+  deleteSavedWorkflow,
   exportWorkflowToFile,
   importWorkflowFromFile,
-  loadFromLocalStorage,
-  saveToLocalStorage,
+  listSavedWorkflows,
+  loadSavedWorkflow,
+  setActiveWorkflowId,
+  type WorkflowSummary,
 } from "@/workflow/storage";
+import {
+  apiCreateWorkflow,
+  apiUpdateWorkflow,
+  WorkflowApiError,
+} from "@/workflow/api/workflowApi";
 import {
   validateWorkflow,
   type ValidationIssue,
 } from "@/workflow/validation";
 import type {
+  FlowVariable,
   WorkflowDoc,
   WorkflowEdge,
   WorkflowNode,
@@ -149,6 +159,31 @@ export interface WorkflowState {
   openRun: () => void;
   closeRun: () => void;
 
+  /** Variables panel visibility. */
+  variablesOpen: boolean;
+  openVariables: () => void;
+  closeVariables: () => void;
+
+  /** Multi-workflow management. */
+  workflowsListOpen: boolean;
+  workflowsIndex: WorkflowSummary[];
+  openWorkflowsList: () => void;
+  closeWorkflowsList: () => void;
+  refreshWorkflowsIndex: () => void;
+  /** Replace the current doc with a new empty workflow (auto-unique name).
+   *  Persists the new workflow to the backend via POST /api/workflows. */
+  createNewWorkflow: () => Promise<{ ok: boolean; error?: string }>;
+  /** Replace the current doc with the saved workflow at `id`. */
+  switchWorkflow: (id: string) => void;
+  /** Delete a saved workflow. If it was the active one, falls through to
+   *  another saved workflow or a fresh empty one. */
+  deleteWorkflowFromIndex: (id: string) => void;
+
+  /** Flow-variable mutations. */
+  addFlowVariable: () => void;
+  updateFlowVariable: (id: string, patch: Partial<FlowVariable>) => void;
+  removeFlowVariable: (id: string) => void;
+
   /** React Flow integrations */
   applyNodeChanges: (changes: NodeChange[]) => void;
   applyEdgeChanges: (changes: EdgeChange[]) => void;
@@ -179,8 +214,8 @@ export interface WorkflowState {
   /** Update the document's display name. */
   setDocName: (name: string) => void;
 
-  /** Persistence */
-  save: () => { ok: boolean; issues: ValidationIssue[] };
+  /** Persistence — sends PUT /api/workflows/{id} to the backend. */
+  save: () => Promise<{ ok: boolean; issues: ValidationIssue[]; error?: string }>;
   exportToFile: () => void;
   importFromFile: (file: File) => Promise<{ ok: boolean; error?: string }>;
   resetToEmpty: () => void;
@@ -192,7 +227,16 @@ export interface WorkflowState {
 
 /** Resolve the initial doc — restore from localStorage when available. */
 function resolveInitialDoc(): WorkflowDoc {
-  return loadFromLocalStorage() ?? createEmptyWorkflow();
+  return bootstrapInitialDoc();
+}
+
+/** Pick a default name that doesn't collide with anything already saved. */
+function uniqueWorkflowName(taken: Set<string>): string {
+  const base = "Untitled workflow";
+  if (!taken.has(base)) return base;
+  let i = 2;
+  while (taken.has(`${base} ${i}`)) i++;
+  return `${base} ${i}`;
 }
 
 export const useWorkflowStore = create<WorkflowState>((set, get) => ({
@@ -203,6 +247,122 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   runOpen: false,
   openRun: () => set({ runOpen: true }),
   closeRun: () => set({ runOpen: false }),
+
+  variablesOpen: false,
+  openVariables: () => set({ variablesOpen: true }),
+  closeVariables: () => set({ variablesOpen: false }),
+
+  workflowsListOpen: false,
+  workflowsIndex: listSavedWorkflows(),
+  openWorkflowsList: () =>
+    set({ workflowsListOpen: true, workflowsIndex: listSavedWorkflows() }),
+  closeWorkflowsList: () => set({ workflowsListOpen: false }),
+  refreshWorkflowsIndex: () => set({ workflowsIndex: listSavedWorkflows() }),
+
+  createNewWorkflow: async () => {
+    const taken = new Set(listSavedWorkflows().map((s) => s.name));
+    const doc = createEmptyWorkflow();
+    doc.name = uniqueWorkflowName(taken);
+
+    try {
+      const response = await apiCreateWorkflow(doc);
+      // The backend may rewrite the workflow_id (e.g., normalize casing); trust
+      // its echoed doc as the source of truth so subsequent PUTs target the
+      // record we just created.
+      const persisted = response.doc;
+      setActiveWorkflowId(persisted.id);
+      set({
+        doc: persisted,
+        selectedNodeId: null,
+        saveError: null,
+        lastSavedAt: Date.now(),
+        workflowsListOpen: false,
+        workflowsIndex: listSavedWorkflows(),
+      });
+      return { ok: true };
+    } catch (e) {
+      const message =
+        e instanceof WorkflowApiError
+          ? `Could not create workflow: ${e.message}`
+          : `Could not create workflow: ${
+              e instanceof Error ? e.message : String(e)
+            }`;
+      set({ saveError: message });
+      return { ok: false, error: message };
+    }
+  },
+
+  switchWorkflow: (id) => {
+    const doc = loadSavedWorkflow(id);
+    if (!doc) return;
+    setActiveWorkflowId(id);
+    set({
+      doc,
+      selectedNodeId: null,
+      saveError: null,
+      lastSavedAt: null,
+      workflowsListOpen: false,
+      workflowsIndex: listSavedWorkflows(),
+    });
+  },
+
+  deleteWorkflowFromIndex: (id) => {
+    const wasActive = get().doc.id === id;
+    deleteSavedWorkflow(id);
+    set({ workflowsIndex: listSavedWorkflows() });
+    if (!wasActive) return;
+
+    const remaining = listSavedWorkflows();
+    if (remaining.length > 0) {
+      get().switchWorkflow(remaining[0].id);
+    } else {
+      void get().createNewWorkflow();
+    }
+  },
+
+  addFlowVariable: () => {
+    set((s) => {
+      const existing = s.doc.flowVariables;
+      // Generate a unique default name `flow_var`, `flow_var_2`, etc.
+      const base = "flow_var";
+      const taken = new Set(existing.map((v) => v.name));
+      let name = base;
+      let i = 2;
+      while (taken.has(name)) {
+        name = `${base}_${i}`;
+        i++;
+      }
+      const next: FlowVariable = {
+        id: `fv_${nanoid(8)}`,
+        name,
+        description: "",
+        type: "string",
+      };
+      return {
+        doc: { ...s.doc, flowVariables: [next, ...existing] },
+      };
+    });
+  },
+
+  updateFlowVariable: (id, patch) => {
+    set((s) => ({
+      doc: {
+        ...s.doc,
+        flowVariables: s.doc.flowVariables.map((v) =>
+          v.id === id ? { ...v, ...patch } : v
+        ),
+      },
+    }));
+  },
+
+  removeFlowVariable: (id) => {
+    set((s) => ({
+      doc: {
+        ...s.doc,
+        flowVariables: s.doc.flowVariables.filter((v) => v.id !== id),
+      },
+    }));
+  },
 
   applyNodeChanges: (changes) => {
     // The Start node is the workflow entry point and must always exist.
@@ -341,7 +501,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   setDocName: (name) =>
     set((s) => ({ doc: { ...s.doc, name } })),
 
-  save: () => {
+  save: async () => {
     const doc = get().doc;
     const result = validateWorkflow(doc);
     if (!result.ok) {
@@ -350,9 +510,35 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       set({ saveError: message });
       return { ok: false, issues: result.issues };
     }
-    saveToLocalStorage(doc);
-    set({ lastSavedAt: Date.now(), saveError: null });
-    return { ok: true, issues: [] };
+
+    try {
+      const response = await apiUpdateWorkflow(doc.id, doc, doc.version);
+      // Bump the local doc version to match what the server returned so the
+      // next save's If-Match header lines up.
+      const nextDoc: WorkflowDoc = {
+        ...doc,
+        version: response.meta.current_version,
+      };
+      setActiveWorkflowId(nextDoc.id);
+      set({
+        doc: nextDoc,
+        lastSavedAt: Date.now(),
+        saveError: null,
+        workflowsIndex: listSavedWorkflows(),
+      });
+      return { ok: true, issues: [] };
+    } catch (e) {
+      const message =
+        e instanceof WorkflowApiError
+          ? e.code === "NOT_FOUND"
+            ? `Could not save — this workflow does not exist on the server yet. Create it first.`
+            : e.code === "CONFLICT"
+            ? `Could not save — the workflow was modified elsewhere. Reload and try again.`
+            : `Could not save: ${e.message}`
+          : `Could not save: ${e instanceof Error ? e.message : String(e)}`;
+      set({ saveError: message });
+      return { ok: false, issues: [], error: message };
+    }
   },
 
   exportToFile: () => {
@@ -375,6 +561,7 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   resetToEmpty: () => {
+    setActiveWorkflowId(null);
     set({
       doc: createEmptyWorkflow(),
       selectedNodeId: null,

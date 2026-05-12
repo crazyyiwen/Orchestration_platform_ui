@@ -275,12 +275,47 @@ function LogRow({ entry }: { entry: LogEntry }) {
           <span className="text-[10px] italic text-amber-700">
             Paused for {entry.pause}…
           </span>
+        ) : isUiViewResult(entry.result) ? (
+          <UiViewResultView result={entry.result} />
         ) : (
           <pre className="max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-[10px] text-ink-700">
             {safeStringify(entry.result)}
           </pre>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Type guard for UI View executor results. */
+function isUiViewResult(
+  r: unknown
+): r is { kind: "ui-view"; html: string; sanitized?: boolean } {
+  return (
+    !!r &&
+    typeof r === "object" &&
+    (r as { kind?: unknown }).kind === "ui-view" &&
+    typeof (r as { html?: unknown }).html === "string"
+  );
+}
+
+function UiViewResultView({
+  result,
+}: {
+  result: { kind: "ui-view"; html: string; sanitized?: boolean };
+}) {
+  return (
+    <div className="overflow-hidden rounded border border-ink-100 bg-white">
+      <div className="flex items-center justify-between border-b border-ink-100 bg-ink-100/40 px-2 py-1 text-[9px] font-medium uppercase tracking-wide text-ink-500">
+        <span>UI View</span>
+        <span>{result.sanitized ? "sanitized" : "raw"} · sandboxed</span>
+      </div>
+      <iframe
+        title="UI View output"
+        srcDoc={result.html}
+        sandbox=""
+        className="block h-48 w-full bg-white"
+      />
     </div>
   );
 }

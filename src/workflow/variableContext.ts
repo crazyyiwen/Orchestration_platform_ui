@@ -39,6 +39,10 @@ export interface VariableContext {
   };
   /** Populated as nodes execute. Keyed by node `data.name`. */
   nodes: Record<string, { result?: unknown }>;
+  /** User-defined flow-scoped state, keyed by FlowVariable.name. Seeded from
+   *  `doc.flowVariables.defaultValue` at execution start; mutable through
+   *  Variable Update nodes. */
+  flow: Record<string, unknown>;
 }
 
 const VAR_PATTERN = /\{\{\s*([^}]+?)\s*\}\}/g;
@@ -182,6 +186,18 @@ function collectNodeVariables(
   return out;
 }
 
+/** Build picker entries for user-defined flow variables. */
+function collectFlowVariables(doc: WorkflowDoc): AvailableVariable[] {
+  return (doc.flowVariables ?? [])
+    .filter((v) => v.name)
+    .map((v) => ({
+      path: `flow.${v.name}`,
+      label: `flow.${v.name}`,
+      description: v.description,
+      valueType: v.type,
+    }));
+}
+
 /**
  * Build the grouped list shown in the variable picker. `excludeNodeId`
  * suppresses self-references (a node shouldn't reference its own result).
@@ -193,6 +209,7 @@ export function getAvailableVariables(
   return [
     { id: "system", title: "System", variables: SYSTEM_VARS },
     { id: "runtime", title: "Runtime", variables: RUNTIME_VARS },
+    { id: "flow", title: "Flow", variables: collectFlowVariables(doc) },
     {
       id: "nodes",
       title: "Node Results",
