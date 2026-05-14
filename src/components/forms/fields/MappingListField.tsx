@@ -3,7 +3,6 @@ import { nanoid } from "nanoid";
 
 import { useFieldSetter, useFieldValue } from "@/components/forms/useField";
 import {
-  inputBase,
   selectBase,
   subtleButton,
   iconButton,
@@ -83,13 +82,27 @@ export function MappingListField({
           key={row.id}
           className="rounded-md border border-ink-100 bg-white p-2"
         >
-          <div className="flex items-center gap-1.5">
-            <input
-              value={row.key}
-              onChange={(e) => update(row.id, { key: e.target.value })}
-              placeholder="key"
-              className={inputBase}
-            />
+          {/* Source value (read FROM) on top — supports {{variable}}. */}
+          <ExpressionInput
+            value={row.value}
+            onChange={(next) => update(row.id, { value: next })}
+            placeholder="value or {{variable.path}}"
+            hidePreview
+          />
+          {/* Target path (write TO) on the bottom, alongside the per-row
+              operation / type / delete controls. `asPath` makes picking from
+              the variable picker insert just `flow.foo` (no `{{}}`), matching
+              what `setByPath` consumes. */}
+          <div className="mt-1.5 flex items-center gap-1.5">
+            <div className="min-w-0 flex-1">
+              <ExpressionInput
+                value={row.key}
+                onChange={(v) => update(row.id, { key: v })}
+                placeholder="target path (e.g. flow.foo)"
+                asPath
+                hidePreview
+              />
+            </div>
             {withOperation && (
               <select
                 value={row.operation ?? "set"}
@@ -130,14 +143,6 @@ export function MappingListField({
             >
               <X size={13} />
             </button>
-          </div>
-          <div className="mt-1.5">
-            <ExpressionInput
-              value={row.value}
-              onChange={(next) => update(row.id, { value: next })}
-              placeholder="value or {{variable.path}}"
-              hidePreview
-            />
           </div>
         </div>
       ))}

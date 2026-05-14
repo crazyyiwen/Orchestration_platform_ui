@@ -33,7 +33,8 @@ export type FieldType =
   | "accordion-section"
   | "script-runner"
   | "handoff-list"
-  | "ui-view-preview";
+  | "ui-view-preview"
+  | "typed-params";
 
 export interface FieldOption {
   label: string;
@@ -198,6 +199,10 @@ export interface WorkflowVariables {
     attachments: unknown[];
     files: unknown[];
     humanInput: string;
+    /** Running list of messages across the workflow, typically appended to
+     *  by agent/LLM nodes via their State Update section. Referenced as
+     *  `{{system.conversationHistory}}`. */
+    conversationHistory: unknown[];
   };
   runtime: {
     workflowMetaData: {

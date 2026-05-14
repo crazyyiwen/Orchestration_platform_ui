@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import clsx from "clsx";
 import {
@@ -14,6 +14,20 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import type { FlowVariable, FlowVariableType } from "@/workflow/types";
 import { Button } from "@/components/ui/Button";
 import { inputBase, selectBase } from "@/components/forms/inputs";
+
+const MIN_WIDTH = 340;
+const MAX_WIDTH = 720;
+const DEFAULT_WIDTH = 420;
+const WIDTH_KEY = "workflow-builder:variables-panel-width";
+
+function readStoredWidth(): number {
+  if (typeof window === "undefined") return DEFAULT_WIDTH;
+  const raw = window.localStorage.getItem(WIDTH_KEY);
+  if (!raw) return DEFAULT_WIDTH;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return DEFAULT_WIDTH;
+  return Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, n));
+}
 
 type Tab = "all" | "flow" | "system";
 
@@ -52,6 +66,12 @@ const SYSTEM_REFS: ReadonlyArray<{
     valueType: "string",
   },
   {
+    path: "system.conversationHistory",
+    description:
+      "Running conversation history. Append to it from agent/LLM nodes via State Update.",
+    valueType: "array",
+  },
+  {
     path: "runtime.workflowMetaData.workflowId",
     description: "This workflow's id.",
     valueType: "string",
@@ -75,7 +95,9 @@ const SYSTEM_REFS: ReadonlyArray<{
 export function VariablesPanel() {
   const open = useWorkflowStore((s) => s.variablesOpen);
   const close = useWorkflowStore((s) => s.closeVariables);
-  const variables = useWorkflowStore((s) => s.doc.flowVariables);
+  // Older backend records may not include `flowVariables` yet; fall back to
+  // an empty array so iteration/filtering never blows up.
+  const variables = useWorkflowStore((s) => s.doc.flowVariables ?? []);
   const add = useWorkflowStore((s) => s.addFlowVariable);
   const update = useWorkflowStore((s) => s.updateFlowVariable);
   const remove = useWorkflowStore((s) => s.removeFlowVariable);
@@ -124,6 +146,42 @@ export function VariablesPanel() {
     );
   }, [query]);
 
+  // Resizable width, persisted to localStorage (UI preference, not workflow data).
+  const [width, setWidth] = useState<number>(readStoredWidth);
+  const resizing = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(WIDTH_KEY, String(width));
+  }, [width]);
+
+  useEffect(() => {
+    const onMove = (e: MouseEvent) => {
+      if (!resizing.current) return;
+      const next = window.innerWidth - e.clientX;
+      setWidth(Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, next)));
+    };
+    const onUp = () => {
+      if (!resizing.current) return;
+      resizing.current = false;
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+  }, []);
+
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    resizing.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  };
+
   if (!open) return null;
 
   const showFlow = tab === "all" || tab === "flow";
@@ -131,9 +189,18 @@ export function VariablesPanel() {
 
   return createPortal(
     <aside
-      style={{ width: 420 }}
+      style={{ width }}
       className="fixed right-0 top-14 z-30 flex h-[calc(100vh-3.5rem)] flex-col border-l border-ink-100 bg-white shadow-2xl"
     >
+      {/* Resize handle on the left edge */}
+      <div
+        onMouseDown={startResize}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label="Resize variables panel"
+        className="absolute left-0 top-0 z-10 h-full w-1.5 -translate-x-1/2 cursor-col-resize bg-transparent transition-colors hover:bg-brand-500/40 active:bg-brand-500/60"
+      />
+
       {/* Header */}
       <div className="flex items-start gap-3 border-b border-ink-100 px-4 py-3">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100">
@@ -285,10 +352,13 @@ function FlowVariableCard({
   onChange: (patch: Partial<FlowVariable>) => void;
   onRemove: () => void;
 }) {
+  // Two-row layout so the name input always gets full width even at the
+  // narrowest panel size. `min-w-0` on the flex child is what lets the input
+  // shrink past its intrinsic ~150px and grow back when there's room.
   return (
     <div className="rounded-md border border-ink-100 bg-white p-2.5">
       <div className="flex items-center gap-2">
-        <span className="flex h-6 w-6 items-center justify-center rounded bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100">
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-indigo-50 text-indigo-600 ring-1 ring-indigo-100">
           <VarIcon size={12} strokeWidth={2.25} />
         </span>
         <input
@@ -298,17 +368,28 @@ function FlowVariableCard({
           }
           placeholder="variable_name"
           className={clsx(
-            `${inputBase} h-7 flex-1 font-mono`,
+            `${inputBase} h-7 min-w-0 flex-1 font-mono`,
             duplicate && "border-rose-300 text-rose-700"
           )}
           spellCheck={false}
         />
+        <button
+          type="button"
+          onClick={onRemove}
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-ink-500 hover:bg-rose-50 hover:text-rose-600"
+          aria-label="Delete variable"
+          title="Delete variable"
+        >
+          <Trash2 size={12} />
+        </button>
+      </div>
+      <div className="mt-1.5 flex items-center gap-2">
         <select
           value={variable.type}
           onChange={(e) =>
             onChange({ type: e.target.value as FlowVariableType })
           }
-          className={`${selectBase} h-7 w-24`}
+          className={`${selectBase} h-7 w-28 shrink-0`}
         >
           {TYPE_OPTIONS.map((t) => (
             <option key={t} value={t}>
@@ -316,15 +397,12 @@ function FlowVariableCard({
             </option>
           ))}
         </select>
-        <button
-          type="button"
-          onClick={onRemove}
-          className="flex h-6 w-6 items-center justify-center rounded text-ink-500 hover:bg-rose-50 hover:text-rose-600"
-          aria-label="Delete variable"
-          title="Delete variable"
-        >
-          <Trash2 size={12} />
-        </button>
+        <span className="truncate font-mono text-[10px] text-blue-700">
+          {`{{flow.${variable.name || "…"}}}`}
+        </span>
+        <span className="ml-auto rounded bg-ink-100 px-1.5 py-0.5 text-[9px] font-medium text-ink-700">
+          flow
+        </span>
       </div>
       <textarea
         value={variable.description ?? ""}
@@ -333,14 +411,6 @@ function FlowVariableCard({
         rows={1}
         className={`${inputBase} mt-1.5 h-7 resize-y py-1.5`}
       />
-      <div className="mt-1.5 flex flex-wrap items-center gap-1 text-[10px] text-ink-500">
-        <span className="font-mono text-blue-700">
-          {`{{flow.${variable.name || "…"}}}`}
-        </span>
-        <span className="ml-auto rounded bg-ink-100 px-1.5 py-0.5 text-[9px] font-medium text-ink-700">
-          flow
-        </span>
-      </div>
       {duplicate && (
         <div className="mt-1.5 flex items-center gap-1 text-[10px] text-rose-600">
           <AlertCircle size={10} />

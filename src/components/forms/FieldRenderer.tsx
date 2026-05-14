@@ -32,6 +32,7 @@ import { AccordionField } from "./fields/AccordionField";
 import { ScriptRunner } from "./fields/ScriptRunner";
 import { HandoffListField } from "./fields/HandoffListField";
 import { UiViewPreview } from "./fields/UiViewPreview";
+import { TypedParamsField } from "./fields/TypedParamsField";
 
 /* ------------------------------------------------------------------ */
 /* Field frame: label + body                                           */
@@ -127,6 +128,8 @@ function FieldBody({
       return <HandoffListField nodeId={nodeId} fieldKey={field.key} />;
     case "ui-view-preview":
       return <UiViewPreview nodeId={nodeId} />;
+    case "typed-params":
+      return <TypedParamsField nodeId={nodeId} fieldKey={field.key} />;
     case "accordion-section":
       // Handled in `FieldRenderer`, never reached.
       return null;

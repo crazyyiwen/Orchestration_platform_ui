@@ -35,6 +35,7 @@ export function createEmptyWorkflow(): WorkflowDoc {
         attachments: [],
         files: [],
         humanInput: "",
+        conversationHistory: [],
       },
       runtime: {
         workflowMetaData: {

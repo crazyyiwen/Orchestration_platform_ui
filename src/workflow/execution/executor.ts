@@ -23,7 +23,11 @@ import {
   type ExecutorResult,
   type StateUpdate,
 } from "./nodeExecutors";
-import type { VariableContext } from "./resolveVariables";
+import {
+  resolveDeep,
+  resolveValue,
+  type VariableContext,
+} from "./resolveVariables";
 
 /* ------------------------------------------------------------------ */
 /* Public types                                                        */
@@ -81,6 +85,7 @@ export function makeInitialState(seed?: { userQuery?: string }): RuntimeState {
         attachments: [],
         files: [],
         humanInput: "",
+        conversationHistory: [],
       },
       runtime: {
         workflowMetaData: { workflowId: "", agentName: "" },
@@ -227,6 +232,10 @@ function tick(doc: WorkflowDoc, state: RuntimeState): RunTick {
     if (result.stateUpdates) {
       applyStateUpdates(state, result.stateUpdates);
     }
+    // Generic post-execution state updates declared on the node's config
+    // (the "State Update" section every non-system node carries). Applies
+    // unconditionally unless `stateUpdatesRunOnlyWhen` is set and falsy.
+    applyConfigStateUpdates(node, state);
     state.log.push({
       nodeId: node.id,
       nodeName: node.data.name,
@@ -274,6 +283,38 @@ function followEdge(
 function applyStateUpdates(state: RuntimeState, updates: StateUpdate[]) {
   for (const u of updates) {
     setByPath(state.ctx as unknown as Record<string, unknown>, u.path, u.value);
+  }
+}
+
+/**
+ * Apply the post-execution state-update list declared on the node's config
+ * (every non-system node carries a "State Update" section). Each row is
+ * `{ key, value, operation }`; for the demo we collapse every operation to
+ * a final set-by-path of the resolved value. `stateUpdatesRunOnlyWhen`, if
+ * present and falsy when resolved, skips the whole list.
+ */
+function applyConfigStateUpdates(node: WorkflowNode, state: RuntimeState) {
+  const cfg = (node.data.config ?? {}) as Record<string, unknown>;
+  const runOnlyWhen = String(cfg.stateUpdatesRunOnlyWhen ?? "").trim();
+  if (runOnlyWhen) {
+    const v = resolveValue(runOnlyWhen, state.ctx);
+    if (!v) return;
+  }
+  const updates = Array.isArray(cfg.stateUpdates)
+    ? (cfg.stateUpdates as Array<{
+        key?: string;
+        value?: unknown;
+        operation?: string;
+      }>)
+    : [];
+  for (const u of updates) {
+    if (!u.key) continue;
+    const resolved = resolveDeep(u.value, state.ctx);
+    setByPath(
+      state.ctx as unknown as Record<string, unknown>,
+      u.key,
+      resolved
+    );
   }
 }
 

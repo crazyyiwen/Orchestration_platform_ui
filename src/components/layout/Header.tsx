@@ -16,6 +16,7 @@ import {
 
 import { Button } from "@/components/ui/Button";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { WorkflowSwitcher } from "@/components/workflows/WorkflowSwitcher";
 
 /**
  * Top header. Owns the workflow display name, the editing-state banner, and
@@ -96,6 +97,8 @@ export function Header() {
           {nodeCount === 1 ? "node" : "nodes"}
         </div>
       </div>
+
+      <WorkflowSwitcher />
 
       <StatusBanner
         saveError={saveError}

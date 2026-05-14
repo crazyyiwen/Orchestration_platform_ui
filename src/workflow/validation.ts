@@ -58,12 +58,19 @@ const edgeSchema = z.object({
 });
 
 const variablesSchema = z.object({
-  system: z.object({
-    userQuery: z.string(),
-    attachments: z.array(z.unknown()),
-    files: z.array(z.unknown()),
-    humanInput: z.string(),
-  }),
+  system: z
+    .object({
+      userQuery: z.string(),
+      attachments: z.array(z.unknown()),
+      files: z.array(z.unknown()),
+      humanInput: z.string(),
+      // Tolerant on read — older saved docs predate conversationHistory.
+      conversationHistory: z.array(z.unknown()).optional(),
+    })
+    .transform((s) => ({
+      ...s,
+      conversationHistory: s.conversationHistory ?? [],
+    })),
   runtime: z.object({
     workflowMetaData: z.object({
       workflowId: z.string(),

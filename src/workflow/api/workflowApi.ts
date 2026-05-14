@@ -12,6 +12,58 @@ import type { WorkflowDoc } from "@/workflow/types";
 
 const API_BASE_URL = "http://localhost:8000";
 
+/**
+ * Coerce a backend-returned doc into the shape the UI expects.
+ *
+ * The backend may omit newer optional fields (`flowVariables`, `edges[].data`
+ * routing offsets, etc.) for records created before the corresponding feature
+ * landed. Filling sensible defaults here keeps every consumer of `doc` —
+ * VariablesPanel, AdjustableEdge, the executor — from having to guard for
+ * `undefined` everywhere.
+ */
+function normalizeDoc(raw: unknown): WorkflowDoc {
+  const doc = (raw ?? {}) as Partial<WorkflowDoc>;
+  return {
+    id: doc.id ?? `wf_${Date.now()}`,
+    name: doc.name ?? "Untitled workflow",
+    version: typeof doc.version === "number" ? doc.version : 1,
+    nodes: Array.isArray(doc.nodes) ? doc.nodes : [],
+    edges: Array.isArray(doc.edges) ? doc.edges : [],
+    variables: doc.variables ?? {
+      system: {
+        userQuery: "",
+        attachments: [],
+        files: [],
+        humanInput: "",
+        conversationHistory: [],
+      },
+      runtime: {
+        workflowMetaData: { workflowId: "", agentName: "" },
+      },
+    },
+    flowVariables: Array.isArray(doc.flowVariables) ? doc.flowVariables : [],
+  };
+}
+
+/**
+ * Finalize a WorkflowResponse from the backend.
+ *
+ * Critical invariant: `doc.version === meta.current_version`. The backend
+ * tracks the optimistic-concurrency version in `meta.current_version` and
+ * doesn't necessarily mirror it inside the stored doc body — so a doc
+ * loaded via GET could carry a stale `version` field, which would then
+ * be sent back in the next PUT's `If-Match` header and CONFLICT against
+ * the (already-advanced) backend version. Forcing the alignment here
+ * means every save after a load uses the up-to-date version.
+ */
+function buildResponse(body: WorkflowResponse): WorkflowResponse {
+  const normalized = normalizeDoc(body.doc);
+  return {
+    meta: body.meta,
+    doc: { ...normalized, version: body.meta.current_version },
+  };
+}
+
 export interface WorkflowMeta {
   workflow_id: string;
   name: string;
@@ -29,6 +81,14 @@ export interface WorkflowMeta {
 export interface WorkflowResponse {
   meta: WorkflowMeta;
   doc: WorkflowDoc;
+}
+
+/** UI-facing summary used by the Workflows list modal. */
+export interface WorkflowSummary {
+  id: string;
+  name: string;
+  /** Unix ms — derived from `meta.updated_at`. */
+  updatedAt: number;
 }
 
 export class WorkflowApiError extends Error {
@@ -69,6 +129,14 @@ async function parseError(res: Response): Promise<WorkflowApiError> {
   return new WorkflowApiError(detail, res.status, code, issues);
 }
 
+export function metaToSummary(meta: WorkflowMeta): WorkflowSummary {
+  return {
+    id: meta.workflow_id,
+    name: meta.name,
+    updatedAt: Date.parse(meta.updated_at) || Date.now(),
+  };
+}
+
 /** POST /api/workflows — create a new workflow record from a UI doc. */
 export async function apiCreateWorkflow(doc: WorkflowDoc): Promise<WorkflowResponse> {
   const res = await fetch(`${API_BASE_URL}/api/workflows`, {
@@ -80,7 +148,8 @@ export async function apiCreateWorkflow(doc: WorkflowDoc): Promise<WorkflowRespo
     }),
   });
   if (!res.ok) throw await parseError(res);
-  return (await res.json()) as WorkflowResponse;
+  const body = (await res.json()) as WorkflowResponse;
+  return buildResponse(body);
 }
 
 /** PUT /api/workflows/{id} — replace the stored doc and bump the version. */
@@ -101,5 +170,46 @@ export async function apiUpdateWorkflow(
     }
   );
   if (!res.ok) throw await parseError(res);
-  return (await res.json()) as WorkflowResponse;
+  const body = (await res.json()) as WorkflowResponse;
+  return buildResponse(body);
+}
+
+/** GET /api/workflows — list every saved workflow as a summary. */
+export async function apiListWorkflows(): Promise<WorkflowSummary[]> {
+  const res = await fetch(`${API_BASE_URL}/api/workflows`);
+  if (!res.ok) throw await parseError(res);
+  const body = (await res.json()) as unknown;
+
+  // Accept either a bare array of metas or a wrapper like `{ items: [...] }`
+  // / `{ workflows: [...] }` so this stays resilient to small backend tweaks.
+  const items: WorkflowMeta[] = Array.isArray(body)
+    ? (body as WorkflowMeta[])
+    : Array.isArray((body as { items?: unknown }).items)
+    ? ((body as { items: WorkflowMeta[] }).items)
+    : Array.isArray((body as { workflows?: unknown }).workflows)
+    ? ((body as { workflows: WorkflowMeta[] }).workflows)
+    : [];
+
+  return items.map(metaToSummary);
+}
+
+/** GET /api/workflows/{id} — load a single workflow's full doc + meta. */
+export async function apiGetWorkflow(
+  workflowId: string
+): Promise<WorkflowResponse> {
+  const res = await fetch(
+    `${API_BASE_URL}/api/workflows/${encodeURIComponent(workflowId)}`
+  );
+  if (!res.ok) throw await parseError(res);
+  const body = (await res.json()) as WorkflowResponse;
+  return buildResponse(body);
+}
+
+/** DELETE /api/workflows/{id} — remove a workflow record. */
+export async function apiDeleteWorkflow(workflowId: string): Promise<void> {
+  const res = await fetch(
+    `${API_BASE_URL}/api/workflows/${encodeURIComponent(workflowId)}`,
+    { method: "DELETE" }
+  );
+  if (!res.ok) throw await parseError(res);
 }

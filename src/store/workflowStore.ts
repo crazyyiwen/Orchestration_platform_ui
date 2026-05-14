@@ -29,19 +29,18 @@ import { nanoid } from "nanoid";
 import { nodeRegistry } from "@/workflow/nodeRegistry";
 import { createEmptyWorkflow } from "@/workflow/defaultWorkflow";
 import {
-  bootstrapInitialDoc,
-  deleteSavedWorkflow,
   exportWorkflowToFile,
   importWorkflowFromFile,
-  listSavedWorkflows,
-  loadSavedWorkflow,
-  setActiveWorkflowId,
-  type WorkflowSummary,
 } from "@/workflow/storage";
 import {
   apiCreateWorkflow,
+  apiDeleteWorkflow,
+  apiGetWorkflow,
+  apiListWorkflows,
   apiUpdateWorkflow,
+  metaToSummary,
   WorkflowApiError,
+  type WorkflowSummary,
 } from "@/workflow/api/workflowApi";
 import {
   validateWorkflow,
@@ -164,20 +163,26 @@ export interface WorkflowState {
   openVariables: () => void;
   closeVariables: () => void;
 
-  /** Multi-workflow management. */
+  /** Multi-workflow management. All persistence flows through the backend
+   *  workflow API — there is no localStorage layer. */
   workflowsListOpen: boolean;
   workflowsIndex: WorkflowSummary[];
+  /** True while the initial list/get bootstrap is in flight. */
+  bootstrapping: boolean;
   openWorkflowsList: () => void;
   closeWorkflowsList: () => void;
-  refreshWorkflowsIndex: () => void;
+  /** GET /api/workflows — refresh the index from the backend. */
+  refreshWorkflowsIndex: () => Promise<void>;
+  /** One-shot init: fetch the list and load the most-recent workflow. */
+  bootstrap: () => Promise<void>;
   /** Replace the current doc with a new empty workflow (auto-unique name).
    *  Persists the new workflow to the backend via POST /api/workflows. */
   createNewWorkflow: () => Promise<{ ok: boolean; error?: string }>;
-  /** Replace the current doc with the saved workflow at `id`. */
-  switchWorkflow: (id: string) => void;
-  /** Delete a saved workflow. If it was the active one, falls through to
-   *  another saved workflow or a fresh empty one. */
-  deleteWorkflowFromIndex: (id: string) => void;
+  /** Replace the current doc with the workflow at `id` (GET /api/workflows/{id}). */
+  switchWorkflow: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  /** Delete a workflow (DELETE /api/workflows/{id}). If it was the active
+   *  one, falls through to another workflow or a fresh empty one. */
+  deleteWorkflowFromIndex: (id: string) => Promise<{ ok: boolean; error?: string }>;
 
   /** Flow-variable mutations. */
   addFlowVariable: () => void;
@@ -225,12 +230,8 @@ export interface WorkflowState {
   getRFEdges: () => Edge[];
 }
 
-/** Resolve the initial doc — restore from localStorage when available. */
-function resolveInitialDoc(): WorkflowDoc {
-  return bootstrapInitialDoc();
-}
-
-/** Pick a default name that doesn't collide with anything already saved. */
+/** Pick a default name that doesn't collide with anything already on the
+ *  index — used when minting a fresh workflow. */
 function uniqueWorkflowName(taken: Set<string>): string {
   const base = "Untitled workflow";
   if (!taken.has(base)) return base;
@@ -239,8 +240,21 @@ function uniqueWorkflowName(taken: Set<string>): string {
   return `${base} ${i}`;
 }
 
+function describeApiError(e: unknown, prefix: string): string {
+  if (e instanceof WorkflowApiError) {
+    if (e.code === "NOT_FOUND") return `${prefix} — workflow not found.`;
+    if (e.code === "CONFLICT")
+      return `${prefix} — the workflow was modified elsewhere. Reload and try again.`;
+    return `${prefix}: ${e.message}`;
+  }
+  return `${prefix}: ${e instanceof Error ? e.message : String(e)}`;
+}
+
 export const useWorkflowStore = create<WorkflowState>((set, get) => ({
-  doc: resolveInitialDoc(),
+  // Synchronous default — the editor opens with a blank canvas while
+  // `bootstrap()` fetches the list and (optionally) loads the most recent
+  // workflow from the backend.
+  doc: createEmptyWorkflow(),
   selectedNodeId: null,
   lastSavedAt: null,
   saveError: null,
@@ -253,71 +267,104 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   closeVariables: () => set({ variablesOpen: false }),
 
   workflowsListOpen: false,
-  workflowsIndex: listSavedWorkflows(),
-  openWorkflowsList: () =>
-    set({ workflowsListOpen: true, workflowsIndex: listSavedWorkflows() }),
+  workflowsIndex: [],
+  bootstrapping: false,
+
+  openWorkflowsList: () => {
+    set({ workflowsListOpen: true });
+    // Fire-and-forget refresh so the modal shows the latest from the backend.
+    void get().refreshWorkflowsIndex();
+  },
   closeWorkflowsList: () => set({ workflowsListOpen: false }),
-  refreshWorkflowsIndex: () => set({ workflowsIndex: listSavedWorkflows() }),
 
-  createNewWorkflow: async () => {
-    const taken = new Set(listSavedWorkflows().map((s) => s.name));
-    const doc = createEmptyWorkflow();
-    doc.name = uniqueWorkflowName(taken);
-
+  refreshWorkflowsIndex: async () => {
     try {
-      const response = await apiCreateWorkflow(doc);
-      // The backend may rewrite the workflow_id (e.g., normalize casing); trust
-      // its echoed doc as the source of truth so subsequent PUTs target the
-      // record we just created.
-      const persisted = response.doc;
-      setActiveWorkflowId(persisted.id);
-      set({
-        doc: persisted,
-        selectedNodeId: null,
-        saveError: null,
-        lastSavedAt: Date.now(),
-        workflowsListOpen: false,
-        workflowsIndex: listSavedWorkflows(),
-      });
-      return { ok: true };
+      const summaries = await apiListWorkflows();
+      set({ workflowsIndex: summaries });
     } catch (e) {
-      const message =
-        e instanceof WorkflowApiError
-          ? `Could not create workflow: ${e.message}`
-          : `Could not create workflow: ${
-              e instanceof Error ? e.message : String(e)
-            }`;
-      set({ saveError: message });
-      return { ok: false, error: message };
+      console.warn("[workflows] failed to refresh index", e);
     }
   },
 
-  switchWorkflow: (id) => {
-    const doc = loadSavedWorkflow(id);
-    if (!doc) return;
-    setActiveWorkflowId(id);
+  /** On app load we hydrate the workflows index so the Open modal works,
+   *  but we don't auto-load anything — the editor stays on the freshly
+   *  minted blank canvas from `createEmptyWorkflow()` until the user
+   *  explicitly opens one. First Save POSTs; subsequent saves PUT. */
+  bootstrap: async () => {
+    if (get().bootstrapping) return;
+    set({ bootstrapping: true });
+    try {
+      const summaries = await apiListWorkflows();
+      set({ workflowsIndex: summaries });
+    } catch (e) {
+      console.warn("[workflows] bootstrap failed", e);
+    } finally {
+      set({ bootstrapping: false });
+    }
+  },
+
+  /** Local-only — swap the canvas for a fresh empty workflow with a new
+   *  id. Nothing is sent to the backend until the user clicks Save (which
+   *  routes to POST for first-time saves). */
+  createNewWorkflow: async () => {
+    const taken = new Set(get().workflowsIndex.map((s) => s.name));
+    const doc = createEmptyWorkflow();
+    doc.name = uniqueWorkflowName(taken);
     set({
       doc,
       selectedNodeId: null,
       saveError: null,
       lastSavedAt: null,
       workflowsListOpen: false,
-      workflowsIndex: listSavedWorkflows(),
     });
+    return { ok: true };
   },
 
-  deleteWorkflowFromIndex: (id) => {
-    const wasActive = get().doc.id === id;
-    deleteSavedWorkflow(id);
-    set({ workflowsIndex: listSavedWorkflows() });
-    if (!wasActive) return;
+  switchWorkflow: async (id) => {
+    try {
+      const response = await apiGetWorkflow(id);
+      const summary = metaToSummary(response.meta);
+      set((s) => ({
+        doc: response.doc,
+        selectedNodeId: null,
+        saveError: null,
+        lastSavedAt: Date.parse(response.meta.updated_at) || null,
+        workflowsListOpen: false,
+        workflowsIndex: s.workflowsIndex.some((w) => w.id === summary.id)
+          ? s.workflowsIndex.map((w) => (w.id === summary.id ? summary : w))
+          : [summary, ...s.workflowsIndex],
+      }));
+      return { ok: true };
+    } catch (e) {
+      const message = describeApiError(e, "Could not load workflow");
+      set({ saveError: message });
+      return { ok: false, error: message };
+    }
+  },
 
-    const remaining = listSavedWorkflows();
+  deleteWorkflowFromIndex: async (id) => {
+    try {
+      await apiDeleteWorkflow(id);
+    } catch (e) {
+      const message = describeApiError(e, "Could not delete workflow");
+      set({ saveError: message });
+      return { ok: false, error: message };
+    }
+
+    const wasActive = get().doc.id === id;
+    set((s) => ({
+      workflowsIndex: s.workflowsIndex.filter((w) => w.id !== id),
+    }));
+
+    if (!wasActive) return { ok: true };
+    const remaining = get().workflowsIndex;
     if (remaining.length > 0) {
-      get().switchWorkflow(remaining[0].id);
+      // Most recent → first since the index is sorted that way by the API.
+      void get().switchWorkflow(remaining[0].id);
     } else {
       void get().createNewWorkflow();
     }
+    return { ok: true };
   },
 
   addFlowVariable: () => {
@@ -511,28 +558,38 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       return { ok: false, issues: result.issues };
     }
 
+    // First-time save → POST. Subsequent saves → PUT. The presence of the
+    // doc's id in the in-memory index is the source of truth — it's
+    // refreshed from the backend on bootstrap, switch, and after any save.
+    const isPersisted = get().workflowsIndex.some((w) => w.id === doc.id);
+
     try {
-      const response = await apiUpdateWorkflow(doc.id, doc, doc.version);
-      // Bump the local doc version to match what the server returned so the
-      // next save's If-Match header lines up.
+      const response = isPersisted
+        ? await apiUpdateWorkflow(doc.id, doc, doc.version)
+        : await apiCreateWorkflow(doc);
+
+      // Adopt the server's canonical id + version, but keep all the local
+      // doc fields (including React Flow runtime measurements on nodes) so
+      // the canvas doesn't have to re-measure after every save.
       const nextDoc: WorkflowDoc = {
         ...doc,
+        id: response.doc.id,
         version: response.meta.current_version,
       };
-      setActiveWorkflowId(nextDoc.id);
-      set({
+      const summary = metaToSummary(response.meta);
+      set((s) => ({
         doc: nextDoc,
         lastSavedAt: Date.now(),
         saveError: null,
-        workflowsIndex: listSavedWorkflows(),
-      });
+        workflowsIndex: s.workflowsIndex.some((w) => w.id === summary.id)
+          ? s.workflowsIndex.map((w) => (w.id === summary.id ? summary : w))
+          : [summary, ...s.workflowsIndex],
+      }));
       return { ok: true, issues: [] };
     } catch (e) {
       const message =
         e instanceof WorkflowApiError
-          ? e.code === "NOT_FOUND"
-            ? `Could not save — this workflow does not exist on the server yet. Create it first.`
-            : e.code === "CONFLICT"
+          ? e.code === "CONFLICT"
             ? `Could not save — the workflow was modified elsewhere. Reload and try again.`
             : `Could not save: ${e.message}`
           : `Could not save: ${e instanceof Error ? e.message : String(e)}`;
@@ -561,7 +618,6 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   },
 
   resetToEmpty: () => {
-    setActiveWorkflowId(null);
     set({
       doc: createEmptyWorkflow(),
       selectedNodeId: null,

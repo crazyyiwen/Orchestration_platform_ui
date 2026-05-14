@@ -2,7 +2,6 @@ import { useRef, useState } from "react";
 import { Braces } from "lucide-react";
 import clsx from "clsx";
 
-import { useWorkflowStore } from "@/store/workflowStore";
 import { VariableChipsPreview } from "./VariableChip";
 import { VariablePicker } from "./VariablePicker";
 
@@ -15,6 +14,13 @@ interface ExpressionInputProps {
   monospace?: boolean;
   /** Hide chips preview below the input (for compact list rows). */
   hidePreview?: boolean;
+  /**
+   * When true, picking a variable inserts the raw dot-path (e.g.
+   * `flow.foo`) instead of a `{{flow.foo}}` reference. Use for target /
+   * write-target inputs like the State Update "key" column where the
+   * runtime calls `setByPath(ctx, path, value)` directly.
+   */
+  asPath?: boolean;
   /** Override the height of the inline `<input>` variant. */
   className?: string;
 }
@@ -36,13 +42,13 @@ export function ExpressionInput({
   placeholder,
   monospace = false,
   hidePreview = false,
+  asPath = false,
   className,
 }: ExpressionInputProps) {
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
-  const selectedNodeId = useWorkflowStore((s) => s.selectedNodeId);
 
   const openPicker = () => {
     setAnchorRect(buttonRef.current?.getBoundingClientRect() ?? null);
@@ -50,7 +56,10 @@ export function ExpressionInput({
   };
 
   const insertAtCaret = (path: string) => {
-    const ref = `{{${path}}}`;
+    // For target/path inputs we want the raw dot-path. For free-form
+    // expression inputs we wrap it in `{{...}}` so `resolveValue` picks it
+    // up at runtime.
+    const ref = asPath ? path : `{{${path}}}`;
     const el = inputRef.current;
     if (el) {
       const start = el.selectionStart ?? value.length;
@@ -119,11 +128,13 @@ export function ExpressionInput({
       </div>
       {!hidePreview && <VariableChipsPreview value={value} />}
       {pickerOpen && (
+        // Intentionally no `excludeNodeId` — the current node IS a valid
+        // reference target for fields evaluated after this node runs
+        // (notably the State Update value/key, which fire post-execution).
         <VariablePicker
           anchorRect={anchorRect}
           onSelect={insertAtCaret}
           onClose={() => setPickerOpen(false)}
-          excludeNodeId={selectedNodeId}
         />
       )}
     </div>

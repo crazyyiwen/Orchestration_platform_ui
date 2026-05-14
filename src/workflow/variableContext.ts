@@ -30,6 +30,9 @@ export interface VariableContext {
     attachments: unknown[];
     files: unknown[];
     humanInput: string;
+    /** Running conversation history across the workflow. Built-in;
+     *  append to it via a State Update on agent/LLM nodes. */
+    conversationHistory: unknown[];
   };
   runtime: {
     workflowMetaData: {
@@ -123,6 +126,13 @@ const SYSTEM_VARS: AvailableVariable[] = [
     path: "system.humanInput",
     label: "system.humanInput",
     description: "Most recent Human Input response.",
+  },
+  {
+    path: "system.conversationHistory",
+    label: "system.conversationHistory",
+    description:
+      "Running conversation history. Append to it from agent/LLM nodes via State Update.",
+    valueType: "array",
   },
 ];
 

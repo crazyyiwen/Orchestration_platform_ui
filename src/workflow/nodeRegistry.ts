@@ -43,6 +43,33 @@ const advanced = (extra: FieldSchema[] = []): FormSection => ({
   ],
 });
 
+/** Generic post-execution state-update section — injected into every node
+ *  (except Start and Variable Update) by the post-processing pass at the
+ *  bottom of this file. After the node's main work finishes, the executor
+ *  applies each row, optionally gated by `stateUpdatesRunOnlyWhen`. */
+const stateUpdateSection: FormSection = {
+  id: "stateUpdate",
+  title: "State Update",
+  defaultCollapsed: true,
+  fields: [
+    {
+      key: "config.stateUpdates",
+      label: "Manage state updates",
+      description:
+        "Updates applied after this node finishes. Target paths like flow.<name>, system.<name>, or any dot-path on the runtime context.",
+      type: "mapping-list",
+      meta: { withOperation: true },
+    },
+    {
+      key: "config.stateUpdatesRunOnlyWhen",
+      label: "Run only when",
+      description:
+        "Optional expression — when truthy, updates run. Leave blank to always apply.",
+      type: "variable-reference",
+    },
+  ],
+};
+
 const responseFormatField: FieldSchema = {
   key: "advanced.responseFormat",
   label: "Response Format",
@@ -108,7 +135,6 @@ export const nodeRegistry: NodeRegistry = {
       model: "OpenAI GPT-5 mini",
       instructions: "",
       messages: [],
-      userQuery: "{{system.userQuery}}",
     },
     handles: {
       inputs: [{ id: "in", label: "Input" }],
@@ -129,12 +155,6 @@ export const nodeRegistry: NodeRegistry = {
           label: "Instructions",
           type: "textarea",
           placeholder: "You are a helpful assistant…",
-        },
-        {
-          key: "config.userQuery",
-          label: "User Query",
-          type: "variable-reference",
-          defaultValue: "{{system.userQuery}}",
         },
       ]),
       {
@@ -173,7 +193,6 @@ export const nodeRegistry: NodeRegistry = {
       model: "OpenAI GPT-5 mini",
       instructions: "",
       messages: [],
-      userQuery: "{{system.userQuery}}",
       attachments: "{{system.attachments}}",
       tools: [],
       libraries: [],
@@ -211,12 +230,6 @@ export const nodeRegistry: NodeRegistry = {
           key: "config.instructions",
           label: "Instructions",
           type: "textarea",
-        },
-        {
-          key: "config.userQuery",
-          label: "User Query",
-          type: "variable-reference",
-          defaultValue: "{{system.userQuery}}",
         },
         {
           key: "config.attachments",
@@ -457,7 +470,10 @@ export const nodeRegistry: NodeRegistry = {
       url: "",
       headers: [],
       query: [],
-      body: "",
+      // Body is a typed-params tree, not a raw JSON string. Each entry
+      // is `{ id, name, type, value?, fields? }` — object params can have
+      // nested fields recursively, primitives bind a literal or {{variable}}.
+      body: [],
       auth: { type: "none", token: "" },
     },
     handles: {
@@ -502,8 +518,9 @@ export const nodeRegistry: NodeRegistry = {
           {
             key: "config.body",
             label: "Body",
-            type: "json",
-            meta: { rows: 6 },
+            description:
+              "Structured body parameters. Add primitives, or define an object with nested fields. Object params without nested fields fall back to a raw JSON editor.",
+            type: "typed-params",
           },
         ],
       },
@@ -909,6 +926,42 @@ export const nodeRegistry: NodeRegistry = {
     ],
   },
 };
+
+/* ------------------------------------------------------------------ */
+/* Inject the generic State Update section into every applicable node. */
+/* ------------------------------------------------------------------ */
+
+const NO_STATE_UPDATE_SECTION = new Set<string>([
+  // Start has no main work and never produces state. No need.
+  "start",
+  // Variable Update's whole purpose is state mutation — its `config.updates`
+  // already drives the same engine; a second "State Update" section here
+  // would be redundant + confusing.
+  "variableUpdate",
+]);
+
+for (const key of Object.keys(nodeRegistry)) {
+  const def = nodeRegistry[key];
+  if (NO_STATE_UPDATE_SECTION.has(def.type)) continue;
+
+  // Insert State Update directly before Advanced if present, else at the end.
+  const advancedIdx = def.formSections.findIndex((s) => s.id === "advanced");
+  if (advancedIdx === -1) {
+    def.formSections = [...def.formSections, stateUpdateSection];
+  } else {
+    def.formSections = [
+      ...def.formSections.slice(0, advancedIdx),
+      stateUpdateSection,
+      ...def.formSections.slice(advancedIdx),
+    ];
+  }
+
+  // Seed default config so freshly dropped nodes have valid fields to read.
+  const cfg = def.defaultConfig as Record<string, unknown>;
+  if (!Array.isArray(cfg.stateUpdates)) cfg.stateUpdates = [];
+  if (typeof cfg.stateUpdatesRunOnlyWhen !== "string")
+    cfg.stateUpdatesRunOnlyWhen = "";
+}
 
 /** Stable list ordering for the palette. Kept here so it's data, not UI logic. */
 export const paletteOrder: string[] = [
