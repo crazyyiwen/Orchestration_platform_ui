@@ -34,7 +34,8 @@ export type FieldType =
   | "script-runner"
   | "handoff-list"
   | "ui-view-preview"
-  | "typed-params";
+  | "typed-params"
+  | "workflow-select";
 
 export interface FieldOption {
   label: string;

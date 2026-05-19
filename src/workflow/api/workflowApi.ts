@@ -129,12 +129,37 @@ async function parseError(res: Response): Promise<WorkflowApiError> {
   return new WorkflowApiError(detail, res.status, code, issues);
 }
 
-export function metaToSummary(meta: WorkflowMeta): WorkflowSummary {
-  return {
-    id: meta.workflow_id,
-    name: meta.name,
-    updatedAt: Date.parse(meta.updated_at) || Date.now(),
+/**
+ * Build a summary from a raw list item.
+ *
+ * The backend stores two name fields per record: a top-level meta `name`
+ * and the full doc body under `latest_doc` (or `doc`). PUT only persists
+ * the doc body — the backend does NOT mirror a rename into the meta
+ * `name` — so `latest_doc.name` is the authoritative current name while
+ * the top-level `name` lags. Prefer the doc-body name; fall back to meta.
+ */
+function listItemToSummary(raw: unknown): WorkflowSummary {
+  const item = (raw ?? {}) as {
+    workflow_id?: string;
+    id?: string;
+    name?: string;
+    updated_at?: string;
+    latest_doc?: { id?: string; name?: string };
+    doc?: { id?: string; name?: string };
   };
+  const id =
+    item.workflow_id ??
+    item.latest_doc?.id ??
+    item.doc?.id ??
+    item.id ??
+    "";
+  const name =
+    item.latest_doc?.name ||
+    item.doc?.name ||
+    item.name ||
+    "Untitled workflow";
+  const updatedAt = item.updated_at ? Date.parse(item.updated_at) : Date.now();
+  return { id, name, updatedAt: updatedAt || Date.now() };
 }
 
 /** POST /api/workflows — create a new workflow record from a UI doc. */
@@ -166,6 +191,10 @@ export async function apiUpdateWorkflow(
     {
       method: "PUT",
       headers,
+      // The backend's PUT body schema only accepts `{ doc }` (sending an
+      // extra `name` field returns HTTP 422). The display name lives in
+      // `doc.name`; the store rebuilds the workflows-index summary from the
+      // saved doc so the UI stays consistent without a separate name field.
       body: JSON.stringify({ doc: serializeWorkflow(doc) }),
     }
   );
@@ -182,15 +211,15 @@ export async function apiListWorkflows(): Promise<WorkflowSummary[]> {
 
   // Accept either a bare array of metas or a wrapper like `{ items: [...] }`
   // / `{ workflows: [...] }` so this stays resilient to small backend tweaks.
-  const items: WorkflowMeta[] = Array.isArray(body)
-    ? (body as WorkflowMeta[])
+  const items: unknown[] = Array.isArray(body)
+    ? body
     : Array.isArray((body as { items?: unknown }).items)
-    ? ((body as { items: WorkflowMeta[] }).items)
+    ? ((body as { items: unknown[] }).items)
     : Array.isArray((body as { workflows?: unknown }).workflows)
-    ? ((body as { workflows: WorkflowMeta[] }).workflows)
+    ? ((body as { workflows: unknown[] }).workflows)
     : [];
 
-  return items.map(metaToSummary);
+  return items.map(listItemToSummary);
 }
 
 /** GET /api/workflows/{id} — load a single workflow's full doc + meta. */

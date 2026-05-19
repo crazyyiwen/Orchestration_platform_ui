@@ -38,7 +38,6 @@ import {
   apiGetWorkflow,
   apiListWorkflows,
   apiUpdateWorkflow,
-  metaToSummary,
   WorkflowApiError,
   type WorkflowSummary,
 } from "@/workflow/api/workflowApi";
@@ -280,7 +279,15 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   refreshWorkflowsIndex: async () => {
     try {
       const summaries = await apiListWorkflows();
-      set({ workflowsIndex: summaries });
+      // GET /api/workflows returns `meta.name`, which lags a rename — PUT
+      // only persists the doc body, not metadata. Override the active
+      // workflow's entry with the live `doc.name` so the autosuggest /
+      // modal / CURRENT badge stay consistent with the header.
+      const doc = get().doc;
+      const patched = summaries.map((s) =>
+        s.id === doc.id ? { ...s, name: doc.name } : s
+      );
+      set({ workflowsIndex: patched });
     } catch (e) {
       console.warn("[workflows] failed to refresh index", e);
     }
@@ -323,7 +330,14 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   switchWorkflow: async (id) => {
     try {
       const response = await apiGetWorkflow(id);
-      const summary = metaToSummary(response.meta);
+      // The doc body is the source of truth for the display name —
+      // `meta.name` can lag if a rename was saved via PUT and the backend
+      // didn't mirror it into metadata.
+      const summary: WorkflowSummary = {
+        id: response.doc.id,
+        name: response.doc.name,
+        updatedAt: Date.parse(response.meta.updated_at) || Date.now(),
+      };
       set((s) => ({
         doc: response.doc,
         selectedNodeId: null,
@@ -576,7 +590,14 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
         id: response.doc.id,
         version: response.meta.current_version,
       };
-      const summary = metaToSummary(response.meta);
+      // Build the index summary from the doc we just saved — its `name` is
+      // what the user sees in the header. `response.meta.name` can lag the
+      // rename if the backend doesn't mirror it.
+      const summary: WorkflowSummary = {
+        id: nextDoc.id,
+        name: nextDoc.name,
+        updatedAt: Date.parse(response.meta.updated_at) || Date.now(),
+      };
       set((s) => ({
         doc: nextDoc,
         lastSavedAt: Date.now(),

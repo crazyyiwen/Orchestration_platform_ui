@@ -692,7 +692,13 @@ export const nodeRegistry: NodeRegistry = {
           type: "select",
           optionsSource: "modules",
         },
-        { key: "config.agentId", label: "Agent", type: "text" },
+        {
+          key: "config.agentId",
+          label: "Agent",
+          description:
+            "Pick a saved workflow to run as this sub-flow step.",
+          type: "workflow-select",
+        },
         {
           key: "config.loadDynamically",
           label: "Load dynamically",

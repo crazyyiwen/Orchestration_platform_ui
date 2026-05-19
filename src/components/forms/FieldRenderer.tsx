@@ -33,6 +33,7 @@ import { ScriptRunner } from "./fields/ScriptRunner";
 import { HandoffListField } from "./fields/HandoffListField";
 import { UiViewPreview } from "./fields/UiViewPreview";
 import { TypedParamsField } from "./fields/TypedParamsField";
+import { WorkflowSelectField } from "./fields/WorkflowSelectField";
 
 /* ------------------------------------------------------------------ */
 /* Field frame: label + body                                           */
@@ -130,6 +131,8 @@ function FieldBody({
       return <UiViewPreview nodeId={nodeId} />;
     case "typed-params":
       return <TypedParamsField nodeId={nodeId} fieldKey={field.key} />;
+    case "workflow-select":
+      return <WorkflowSelectField nodeId={nodeId} fieldKey={field.key} />;
     case "accordion-section":
       // Handled in `FieldRenderer`, never reached.
       return null;

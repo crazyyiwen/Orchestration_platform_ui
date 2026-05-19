@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find d:/Agents/orchestration_platform_ui/Orchestration_platform_ui -iname \"*energy_analysis*\" -not -path \"*/node_modules/*\" 2>/dev/null; ls ~/Downloads/*energy* 2>/dev/null; echo \"---done---\")",
+      "Read(//c/Users/crazy/Downloads/**)",
+      "Bash(python -c \"import json,sys; d=json.load\\(open\\('energy-analysis-workflow.json'\\)\\); print\\('name:', d.get\\('name'\\)\\); print\\('version:', d.get\\('version'\\)\\); print\\('node count:', len\\(d.get\\('nodes',[]\\)\\)\\); [print\\(' ', n.get\\('type'\\), '|', n.get\\('data',{}\\).get\\('type'\\), '|', n.get\\('data',{}\\).get\\('name'\\)\\) for n in d.get\\('nodes',[]\\)]\")"
+    ]
+  }
+}
